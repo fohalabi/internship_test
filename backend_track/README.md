@@ -1,206 +1,140 @@
-# TaxStreem Internship — Backend Track
-### TypeScript / Node.js · Golang (Optional Advanced Path)
+# TaxStreem Backend Track — Transaction Reconciliation Microservice
+
+A lightweight Node.js/TypeScript microservice that reconciles transactions between an internal system and an external payment processor.
 
 ---
 
-## Overview
+## Approach
 
-Welcome to the TaxStreem Backend Internship Assessment.
+The core of this service is a single `POST /reconcile` endpoint that accepts two lists of transactions (internal and external) and compares them using a priority-based matching strategy.
 
-This task is designed to simulate a real-world problem you will encounter working inside our systems. We are not testing whether you know everything — we are testing **how you think, structure your work, and communicate decisions**.
+Matching happens in this order:
 
-> ⏱️ **Time Budget:** 2–4 hours maximum. Do not exceed this. A clean 2-hour submission beats a half-baked 6-hour one.
+1. **Exact match** — same reference AND same amount. These are clean, confirmed matches.
+2. **Tolerance match** — same reference but amount differs within a configurable threshold (default ±500 NGN). These flag potential discrepancies worth reviewing.
+3. **Unmatched** — anything left over on either side is surfaced as unmatched.
 
----
+The logic is built around a single loop over internal transactions. For each one, we find a corresponding external transaction by reference. If found, we check the amount difference. A `Set` tracks which external transactions have already been matched to prevent double-matching.
 
-## The Task: Transaction Reconciliation Microservice (Lite)
+The tolerance threshold is read from the `TOLERANCE_AMOUNT` environment variable, making it configurable without touching code.
 
-Financial systems need to reconcile transactions between internal records and external payment processors. Mismatches reveal bugs, fraud, or integration failures. You're building the core of that system.
-
-### Primary Languages
-- **TypeScript / Node.js**
-- **Golang** 
+For performance, internal transactions are processed in parallel using `Promise.all`, with an external reference map built upfront for O(1) lookups instead of O(n) scanning.
 
 ---
 
-## Specification
+## Assumptions
 
-### Endpoint
+- Matching is done strictly by `reference` field. Two transactions with the same reference are considered a pair.
+- Each reference is assumed to be unique per list. If duplicates exist, the first match wins.
+- Currency is not used in matching logic — the spec did not require cross-currency reconciliation.
+- Amount values are integers (e.g. kobo or minor units), not floats.
+- An empty request body (empty arrays) is valid and returns zeroed summary.
 
+---
+
+## Trade-offs
+
+- **No database** — transactions are reconciled in-memory per request. This is intentional per the spec.
+- **No authentication** — out of scope for this assessment.
+- **Single reference match** — the matcher picks the first external transaction matching a reference. A production system might need more sophisticated deduplication.
+- **Synchronous matching** — the current implementation is synchronous. For very large payloads, parallel processing would improve performance.
+
+---
+
+## What I'd Improve With More Time
+
+- Add a Golang implementation of the same service
+- Add more edge case tests (duplicate references, negative amounts, missing fields)
+- Add request ID tracing to logs for better observability
+- Add a health check endpoint (`GET /health`)
+
+---
+
+## How to Run
+
+### Requirements
+- Node.js v20+
+- npm
+
+### Setup
+```bash
+# Clone the repo
+git clone https://github.com/fohalabi/internship_test.git
+cd internship_test/backend_track
+
+# Install dependencies
+npm install
+
+# Copy environment variables
+cp .env.example .env
+
+# Start the dev server
+npm run dev
 ```
-POST /reconcile
-Content-Type: application/json
+
+### Run with Docker
+```bash
+# Build the image
+docker build -t taxstream-reconcile .
+
+# Run the container
+docker run -p 3000:3000 taxstream-reconcile
+
+# Or using docker-compose
+docker-compose up
 ```
 
-### Request Body
-
-```json
-{
-  "internal": [
-    { "id": "TXN-001", "amount": 10000, "currency": "NGN", "reference": "PAY-A" },
-    { "id": "TXN-002", "amount": 20000, "currency": "NGN", "reference": "PAY-B" },
-    { "id": "TXN-003", "amount": 5000,  "currency": "NGN", "reference": "PAY-C" }
-  ],
-  "external": [
-    { "id": "EXT-A", "amount": 10000, "currency": "NGN", "reference": "PAY-A" },
-    { "id": "EXT-B", "amount": 20500, "currency": "NGN", "reference": "PAY-B" },
-    { "id": "EXT-D", "amount": 7500,  "currency": "NGN", "reference": "PAY-D" }
-  ]
-}
+### Test the endpoint
+```bash
+curl -X POST http://localhost:3000/reconcile \
+  -H "Content-Type: application/json" \
+  -d '{
+    "internal": [
+      { "id": "TXN-001", "amount": 10000, "currency": "NGN", "reference": "PAY-A" },
+      { "id": "TXN-002", "amount": 20000, "currency": "NGN", "reference": "PAY-B" },
+      { "id": "TXN-003", "amount": 5000,  "currency": "NGN", "reference": "PAY-C" }
+    ],
+    "external": [
+      { "id": "EXT-A", "amount": 10000, "currency": "NGN", "reference": "PAY-A" },
+      { "id": "EXT-B", "amount": 20500, "currency": "NGN", "reference": "PAY-B" },
+      { "id": "EXT-D", "amount": 7500,  "currency": "NGN", "reference": "PAY-D" }
+    ]
+  }'
 ```
 
-### Expected Response
-
-```json
-{
-  "matched": [
-    {
-      "internal_id": "TXN-001",
-      "external_id": "EXT-A",
-      "amount": 10000,
-      "status": "exact"
-    }
-  ],
-  "near_matched": [
-    {
-      "internal_id": "TXN-002",
-      "external_id": "EXT-B",
-      "internal_amount": 20000,
-      "external_amount": 20500,
-      "difference": 500,
-      "status": "tolerance_match"
-    }
-  ],
-  "unmatched_internal": [
-    { "id": "TXN-003", "amount": 5000, "reference": "PAY-C" }
-  ],
-  "unmatched_external": [
-    { "id": "EXT-D", "amount": 7500, "reference": "PAY-D" }
-  ],
-  "summary": {
-    "total_internal": 3,
-    "total_external": 3,
-    "matched": 1,
-    "near_matched": 1,
-    "unmatched_internal": 1,
-    "unmatched_external": 1
-  }
-}
+### Run tests
+```bash
+npm test
 ```
 
 ---
 
-## Matching Logic
-
-Implement the following matching strategy (in priority order):
-
-1. **Exact Match** — same `reference` AND same `amount`
-2. **Tolerance Match** — same `reference` AND amount difference within ±500 NGN (configurable via env var `TOLERANCE_AMOUNT`)
-3. **Unmatched** — anything left over
-
-> The tolerance threshold should be configurable, not hardcoded.
-
----
-
-## Project Structure (Expected)
-
+## Project Structure
 ```
-backend_task/
+backend_track/
 ├── src/
 │   ├── routes/
-│   │   └── reconcile.ts
+│   │   └── reconcile.ts       # Route handler and input validation
 │   ├── services/
-│   │   └── reconciliationService.ts
+│   │   └── reconciliationService.ts  # Formats and returns response
 │   ├── utils/
-│   │   └── matcher.ts
+│   │   └── matcher.ts         # Core matching logic
 │   ├── types/
-│   │   └── index.ts
-│   └── index.ts
+│   │   └── index.ts           # TypeScript interfaces
+│   └── index.ts               # Entry point
 ├── tests/
-│   └── matcher.test.ts
+│   └── matcher.test.ts        # Unit tests
 ├── .env.example
-├── package.json
+├── jest.config.js
 ├── tsconfig.json
-└── README.md
+└── package.json
 ```
 
 ---
 
-## Requirements (Must Have)
+## Environment Variables
 
-- [ ] Working `POST /reconcile` endpoint
-- [ ] Exact and tolerance-based matching logic
-- [ ] Proper TypeScript types — no `any`
-- [ ] Input validation with clear error messages (400 for bad input)
-- [ ] `.env.example` with `TOLERANCE_AMOUNT` documented
-- [ ] README with setup instructions
-
-## Bonus (Top 10% separators)
-
-- [ ] Unit tests for matching logic (Jest or Vitest)
-- [ ] Golang implementation of the same service (separate folder)
-- [ ] Structured logging (e.g. pino or winston)
-- [ ] Concurrent/parallel matching for large payloads
-- [ ] Docker / docker-compose setup
-
----
-
-## What NOT To Do
-
-- Do not over-engineer. No databases, no auth, no queues needed.
-- Do not use `any` in TypeScript — it defeats the purpose.
-- Do not submit without running your own code first.
-- Do not copy-paste without understanding what it does.
-
----
-
-## Submission
-
-- GitHub repo (preferred)
-- Deadline: **72 hours from receipt**
-- Your repo must include a `README.md` (see below)
-
----
-
-## Required README Contents
-
-Your README **must** answer:
-
-1. **Approach** — how did you design the matching logic?
-2. **Assumptions** — what did you assume where the spec was silent?
-3. **Trade-offs** — what did you sacrifice for simplicity?
-4. **What you'd improve** — with more time, what would you change?
-5. **How to run** — clear setup steps (should work on a fresh machine)
-
-> This README is weighted equally to your code. If we can't understand your thinking, your code doesn't matter.
-
----
-
-## Evaluation Rubric
-
-| Area                          | Weight |
-|-------------------------------|--------|
-| Code clarity & structure      | 30%    |
-| Problem solving & logic       | 30%    |
-| TypeScript correctness        | 20%    |
-| Communication (README)        | 20%    |
-
----
-
-## Environment & Tools
-
-- Node.js v20+
-- TypeScript v5+
-- Golang 1.24+
-- Any HTTP framework (Express, Fastify, Elysia — your choice)
-- Jest or Vitest for tests
-
----
-
-## Questions?
-
-If anything is genuinely unclear, email us. We prefer candidates who ask sharp questions over candidates who assume silently and build the wrong thing.
-
-Good luck. Ship something real.
-
-**— TaxStreem Engineering**
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | Port the server listens on |
+| `TOLERANCE_AMOUNT` | `500` | Max amount difference (in NGN) for a tolerance match |

@@ -1,8 +1,8 @@
 import { reconcileTransactions } from '../src/utils/matcher';
 
 describe('reconcileTransactions', () => {
-  test('happy path — exact matches only', () => {
-    const result = reconcileTransactions(
+  test('happy path — exact matches only', async () => {
+    const result = await reconcileTransactions(
       [
         { id: 'TXN-001', amount: 10000, currency: 'NGN', reference: 'PAY-A' },
         { id: 'TXN-002', amount: 20000, currency: 'NGN', reference: 'PAY-B' },
@@ -18,8 +18,8 @@ describe('reconcileTransactions', () => {
     expect(result.unmatched_external).toHaveLength(0);
   });
 
-  test('mixed — exact, tolerance, and unmatched', () => {
-    const result = reconcileTransactions(
+  test('mixed — exact, tolerance, and unmatched', async () => {
+    const result = await reconcileTransactions(
       [
         { id: 'TXN-001', amount: 10000, currency: 'NGN', reference: 'PAY-A' },
         { id: 'TXN-002', amount: 20000, currency: 'NGN', reference: 'PAY-B' },
@@ -37,16 +37,16 @@ describe('reconcileTransactions', () => {
     expect(result.unmatched_external).toHaveLength(1);
   });
 
-  test('edge case — empty arrays', () => {
-    const result = reconcileTransactions([], []);
+  test('edge case — empty arrays', async () => {
+    const result = await reconcileTransactions([], []);
     expect(result.matched).toHaveLength(0);
     expect(result.near_matched).toHaveLength(0);
     expect(result.unmatched_internal).toHaveLength(0);
     expect(result.unmatched_external).toHaveLength(0);
   });
 
-  test('edge case — all unmatched', () => {
-    const result = reconcileTransactions(
+  test('edge case — all unmatched', async () => {
+    const result = await reconcileTransactions(
       [{ id: 'TXN-001', amount: 10000, currency: 'NGN', reference: 'PAY-X' }],
       [{ id: 'EXT-001', amount: 10000, currency: 'NGN', reference: 'PAY-Z' }]
     );
